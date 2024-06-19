@@ -44,13 +44,21 @@ public:
 
     int valueToFront(uint8_t value)
     {
-        auto pos = std::find(mtf.begin(), mtf.end(), value);
-        int index = std::distance(mtf.begin(), pos);
-        if (pos != mtf.begin())
+        int index = 0;
+        uint8_t temp = mtf[0];
+
+        if (value == temp)
         {
-            mtf.erase(pos);
-            mtf.insert(mtf.begin(), value);
+            return index;
         }
+
+        mtf[0] = value;
+        while (temp != value)
+        {
+            index++;
+            std::swap(mtf[index], temp);
+        }
+
         return index;
     }
 

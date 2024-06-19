@@ -24,8 +24,6 @@
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
-#include <cstdint>
-
 static constexpr int BLOCK_HEADER_MARKER_1 = 0x314159;
 static constexpr int BLOCK_HEADER_MARKER_2 = 0x265359;
 static constexpr int HUFFMAN_GROUP_RUN_LENGTH = 50;

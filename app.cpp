@@ -65,17 +65,16 @@ int main(int argc, char *argv[])
 
         OutputStream bz2out(outputFile, blockSize);
 
-        const size_t bufferSize = 1000000;
+        const size_t bufferSize = 131072;
         std::vector<char> buffer(bufferSize);
 
         while (inputFile)
         {
             inputFile.read(buffer.data(), bufferSize);
             std::streamsize bytes_read = inputFile.gcount();
-            std::cout <<bytes_read << std::endl;
-            if (bytes_read > 0)
+            for (int i = 0; i < bytes_read; ++i)
             {
-                bz2out.write(buffer, 0, bytes_read);
+                bz2out.write(buffer[i]);
             }
         }
         bz2out.close();
