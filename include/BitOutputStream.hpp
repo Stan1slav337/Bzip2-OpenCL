@@ -37,33 +37,75 @@ private:
 public:
     explicit BitOutputStream() = default;
 
-    size_t getBitCount() const
+    std::vector<bool> getLeftBuffer()
     {
-        return bitCount;
-    }
-
-    void reset()
-    {
-        // Shift left-over bits
-        for (size_t i = 0UL; i < (bitCount % 8UL); ++i)
+        if (bitCount >= 8U)
         {
-            bitBuffer[i] = bitBuffer[i + bitCount - (bitCount % 8)];
+            throw std::runtime_error("Couldn't write all bytes properly during last step.");
         }
-        bitCount %= 8UL;
+
+        std::vector<bool> leftBuffer(bitCount);
+        for (int i = 0; i < bitCount; ++i)
+        {
+            leftBuffer[i] = bitBuffer[i];
+        }
+        bitCount = 0UL;
+
+        return leftBuffer;
     }
 
-    void writeFileBytes(std::ostream &out)
+    void writeFileBytes(std::ostream &out, const std::vector<bool> &leftBuffer)
     {
+        size_t bitsLeft = leftBuffer.size();
+
+        // leftover and current doesn't make a byte
+        if (bitsLeft + bitCount < 8UL)
+        {
+            if (bitCount)
+            {
+                for (size_t i = bitCount - 1UL; i >= 0UL; --i)
+                {
+                    bitBuffer[i + bitsLeft] = bitBuffer[i];
+                }
+            }
+
+            for (size_t i = 0UL; i < bitsLeft; ++i)
+            {
+                bitBuffer[i] = leftBuffer[i];
+            }
+            bitCount += bitsLeft;
+            return;
+        }
+
+        unsigned char byte = 0U;
+        for (bool leftBit : leftBuffer)
+        {
+            byte = (byte << 1) | leftBit;
+        }
+        size_t offset = 8UL - bitsLeft;
+        for (size_t i = 0UL; i < offset; ++i)
+        {
+            byte = (byte << 1) | bitBuffer[i];
+        }
+        out.put(byte);
+
+        bitCount -= offset;
         for (size_t i = 0UL; i < bitCount / 8UL; ++i)
         {
-            unsigned char byte = 0U;
+            byte = 0U;
             for (int j = 0; j < 8; ++j)
             {
-                byte = (byte << 1) | bitBuffer[i * 8UL + j];
+                byte = (byte << 1) | bitBuffer[i * 8UL + j + offset];
             }
             out.put(byte);
         }
-        reset();
+
+        // Shift left-over bits
+        for (size_t i = 0UL; i < (bitCount % 8UL); ++i)
+        {
+            bitBuffer[i] = bitBuffer[i + bitCount - (bitCount % 8) + offset];
+        }
+        bitCount %= 8UL;
     }
 
     void writeBoolean(bool value)

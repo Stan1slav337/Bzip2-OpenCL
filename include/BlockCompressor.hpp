@@ -39,7 +39,7 @@
 class BlockCompressor
 {
 private:
-    BitOutputStream &bitOutputStream;
+    BitOutputStream bitOutputStream{};
     CRC32 crc{};
     int blockLength = 0;
     int blockLengthLimit;
@@ -51,10 +51,9 @@ private:
     int rleLength = 0;
 
 public:
-    BlockCompressor(BitOutputStream &outputStream, int blockSize) : bitOutputStream(outputStream),
-                                                                    block(blockSize + 1), // plus one to allow for the BWT wraparound
-                                                                    bwtBlock(blockSize + 1),
-                                                                    blockLengthLimit(blockSize - 6)
+    BlockCompressor(int blockSize) : block(blockSize + 1), // plus one to allow for the BWT wraparound
+                                     bwtBlock(blockSize + 1),
+                                     blockLengthLimit(blockSize - 6)
     {
     }
 
@@ -66,6 +65,11 @@ public:
     int getCRC() const
     {
         return crc.getCRC();
+    }
+
+    BitOutputStream &getBitOutputStream()
+    {
+        return bitOutputStream;
     }
 
     bool write(int value)

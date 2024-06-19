@@ -63,7 +63,7 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        OutputStream bz2out(outputFile, blockSize);
+        OutputStream bz2out(outputFile, blockSize, 12);
 
         const size_t bufferSize = 131072;
         std::vector<char> buffer(bufferSize);

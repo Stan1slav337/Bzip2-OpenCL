@@ -38,21 +38,31 @@ private:
     bool streamFinished = false;
     int streamBlockSize;
     int streamCRC = 0;
-    BitOutputStream blockOutputStream{};
-    BlockCompressor blockCompressor;
+    int compressorIdx = 0;
+    std::vector<BlockCompressor> blockCompressors{};
 
 public:
-    OutputStream(std::ostream &out, int blockSizeMultiplier) : outputStream(out), streamBlockSize(blockSizeMultiplier * 100000), blockCompressor(blockOutputStream, streamBlockSize)
+    OutputStream(std::ostream &out, int blockSizeMultiplier, int parallelBlockCnt) : outputStream(out), streamBlockSize(blockSizeMultiplier * 100000)
     {
         if (blockSizeMultiplier < 1 || blockSizeMultiplier > 9)
         {
             throw std::invalid_argument("Invalid block size");
         }
+
+        if (parallelBlockCnt < 1)
+        {
+            throw std::invalid_argument("Invalid parallel block count");
+        }
+
+        for (int i = 0; i < parallelBlockCnt; ++i)
+        {
+            blockCompressors.emplace_back(streamBlockSize);
+        }
         // Initial block has stream start info
+        auto &blockOutputStream = blockCompressors[0].getBitOutputStream();
         blockOutputStream.writeBits(16, STREAM_START_MARKER_1);
         blockOutputStream.writeBits(8, STREAM_START_MARKER_2);
         blockOutputStream.writeBits(8, '0' + blockSizeMultiplier);
-        initialiseNextBlock();
     }
 
     void write(int value)
@@ -61,11 +71,10 @@ public:
         {
             throw std::runtime_error("Write beyond end of stream");
         }
-        if (!blockCompressor.write(value & 0xff))
+        if (!blockCompressors[compressorIdx].write(value & 0xff))
         {
-            closeBlock();
-            initialiseNextBlock();
-            blockCompressor.write(value & 0xff);
+            getNextCompressor();
+            blockCompressors[compressorIdx].write(value & 0xff);
         }
     }
 
@@ -79,10 +88,9 @@ public:
         int bytesWritten = 0;
         while (length > 0)
         {
-            if ((bytesWritten = blockCompressor.write(data, offset, length)) < length)
+            if ((bytesWritten = blockCompressors[compressorIdx].write(data, offset, length)) < length)
             {
-                closeBlock();
-                initialiseNextBlock();
+                getNextCompressor();
             }
             offset += bytesWritten;
             length -= bytesWritten;
@@ -94,30 +102,62 @@ public:
         if (!streamFinished)
         {
             streamFinished = true;
-            closeBlock();
+            closeBlocks();
+            auto &blockOutputStream = blockCompressors[0].getBitOutputStream();
             blockOutputStream.writeBits(24, STREAM_END_MARKER_1);
             blockOutputStream.writeBits(24, STREAM_END_MARKER_2);
             blockOutputStream.writeInteger(streamCRC);
             blockOutputStream.padding();
-            blockOutputStream.writeFileBytes(outputStream);
+            blockOutputStream.writeFileBytes(outputStream, {}); // No leftover
             outputStream.flush();
         }
     }
 
 private:
-    void initialiseNextBlock()
+    void getNextCompressor()
     {
-        blockCompressor.reset();
+        compressorIdx++;
+        // std::cout << compressorIdx << std::endl;
+
+        if (compressorIdx == blockCompressors.size())
+        {
+            closeBlocks();
+            compressorIdx = 0;
+        }
     }
 
-    void closeBlock()
+    void closeBlocks()
+    {
+        for (auto &blockCompressor : blockCompressors)
+        {
+            closeBlock(blockCompressor);
+        }
+
+        std::vector<bool> leftBuffer{};
+        for (auto &blockCompressor : blockCompressors)
+        {
+            if (!blockCompressor.isEmpty())
+            {
+                int blockCRC = blockCompressor.getCRC();
+                streamCRC = ((streamCRC << 1) | (static_cast<unsigned int>(streamCRC) >> 31)) ^ blockCRC;
+
+                auto &blockOutputStream = blockCompressor.getBitOutputStream();
+                blockOutputStream.writeFileBytes(outputStream, leftBuffer);
+                leftBuffer = blockOutputStream.getLeftBuffer();
+            }
+            blockCompressor.reset();
+        }
+
+        // Leftover is written in the next iteration
+        auto &blockOutputStream = blockCompressors[0].getBitOutputStream();
+        blockOutputStream.writeFileBytes(outputStream, leftBuffer);
+    }
+
+    void closeBlock(BlockCompressor &blockCompressor)
     {
         if (!blockCompressor.isEmpty())
         {
             blockCompressor.close();
-            blockOutputStream.writeFileBytes(outputStream);
-            int blockCRC = blockCompressor.getCRC();
-            streamCRC = ((streamCRC << 1) | (static_cast<unsigned int>(streamCRC) >> 31)) ^ blockCRC;
         }
     }
 };
