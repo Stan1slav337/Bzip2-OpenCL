@@ -39,10 +39,10 @@ private:
     int streamBlockSize;
     int streamCRC = 0;
     BitOutputStream blockOutputStream{};
-    std::unique_ptr<BlockCompressor> blockCompressor{};
+    BlockCompressor blockCompressor;
 
 public:
-    OutputStream(std::ostream &out, int blockSizeMultiplier) : outputStream(out), streamBlockSize(blockSizeMultiplier * 100000)
+    OutputStream(std::ostream &out, int blockSizeMultiplier) : outputStream(out), streamBlockSize(blockSizeMultiplier * 100000), blockCompressor(blockOutputStream, streamBlockSize)
     {
         if (blockSizeMultiplier < 1 || blockSizeMultiplier > 9)
         {
@@ -61,11 +61,11 @@ public:
         {
             throw std::runtime_error("Write beyond end of stream");
         }
-        if (!blockCompressor->write(value & 0xff))
+        if (!blockCompressor.write(value & 0xff))
         {
             closeBlock();
             initialiseNextBlock();
-            blockCompressor->write(value & 0xff);
+            blockCompressor.write(value & 0xff);
         }
     }
 
@@ -79,7 +79,7 @@ public:
         int bytesWritten = 0;
         while (length > 0)
         {
-            if ((bytesWritten = blockCompressor->write(data, offset, length)) < length)
+            if ((bytesWritten = blockCompressor.write(data, offset, length)) < length)
             {
                 closeBlock();
                 initialiseNextBlock();
@@ -107,16 +107,16 @@ public:
 private:
     void initialiseNextBlock()
     {
-        blockCompressor.reset(new BlockCompressor(blockOutputStream, streamBlockSize));
+        blockCompressor.reset();
     }
 
     void closeBlock()
     {
-        if (!blockCompressor->isEmpty())
+        if (!blockCompressor.isEmpty())
         {
-            blockCompressor->close();
+            blockCompressor.close();
             blockOutputStream.writeFileBytes(outputStream);
-            int blockCRC = blockCompressor->getCRC();
+            int blockCRC = blockCompressor.getCRC();
             streamCRC = ((streamCRC << 1) | (static_cast<unsigned int>(streamCRC) >> 31)) ^ blockCRC;
         }
     }

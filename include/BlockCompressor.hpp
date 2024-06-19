@@ -138,6 +138,25 @@ public:
         huffmanEncoder.encode();
     }
 
+    void reset()
+    {
+        crc.reset();
+        blockLength = 0;
+        rleCurrentValue = -1;
+        rleLength = 0;
+
+        for (int i = 0; i < 256; ++i)
+        {
+            blockValuesPresent[i] = false;
+        }
+
+        for (int i = 0; i < block.size(); ++i)
+        {
+            block[i] = 0U;
+            bwtBlock[i] = 0;
+        }
+    }
+
 private:
     void writeSymbolMap()
     {

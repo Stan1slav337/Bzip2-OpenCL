@@ -84,5 +84,10 @@ public:
             updateCRC(value);
         }
     }
+
+    void reset()
+    {
+        crc = 0xffffffff;
+    }
 };
 #endif
