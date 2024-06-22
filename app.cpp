@@ -8,27 +8,22 @@
 
 int main(int argc, char *argv[])
 {
+    const char *flags = "\n\n  [--help|-h]              print help\n  [--dec|-d]               decompress file\n  [--keep|-k]              keep original (de)compressed file\n  [--check|-c]             check compressed file integrity\n  [--size|-s <1-9>]        set block size 10k .. 90k\n  [--parallel|-p <1+>]     number of parallel threads for gpu\n";
     if (argc < 2)
     {
-        std::cerr << "Usage: " << argv[0] << " <filename> [--dec|-d] [--keep|-k] [--size|-s <1-9>] [--check|-c]" << std::endl;
+        std::cerr << "\n  Usage: .\\bzip2.exe [file_path] [flags]" << flags << std::endl;
         return 1;
     }
 
-    std::string filename = argv[1];
-    std::ifstream inputFile(filename, std::ios::binary);
-    if (!inputFile.is_open())
-    {
-        std::cerr << "Failed to open input file." << std::endl;
-        return 1;
-    }
-
+    std::string filename;
     bool decompress = false;
     bool keepFile = false;
     bool checkCRC = false;
-    int blockSize = 9; // Default block size
+    int blockSize = 9;    // Default block size
+    int parallelCnt = 10; // Default parallel blocks
 
     // Parse command-line arguments
-    for (int i = 2; i < argc; ++i)
+    for (int i = 1; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--dec") == 0 || std::strcmp(argv[i], "-d") == 0)
         {
@@ -41,19 +36,39 @@ int main(int argc, char *argv[])
         else if ((std::strcmp(argv[i], "--size") == 0 || std::strcmp(argv[i], "-s") == 0) && i + 1 < argc)
         {
             blockSize = std::atoi(argv[++i]);
-            if (blockSize < 1 || blockSize > 9)
-            {
-                std::cerr << "Invalid block size. Must be between 1 and 9." << std::endl;
-                return 1;
-            }
+        }
+        else if ((std::strcmp(argv[i], "--parallel") == 0 || std::strcmp(argv[i], "-p") == 0) && i + 1 < argc)
+        {
+            parallelCnt = std::atoi(argv[++i]);
         }
         else if (std::strcmp(argv[i], "--check") == 0 || std::strcmp(argv[i], "-c") == 0)
         {
             checkCRC = true;
         }
+        else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0)
+        {
+            std::cout << "\n  Usage: .\\bzip2.exe [file_path] [flags]" << flags << std::endl;
+            return 0;
+        }
+        else if (argv[i][0] == '-')
+        {
+            std::cerr << "  Unknown flag!\n\n  Usage: .\\bzip2.exe [file_path] [flags]" << flags << std::endl;
+            return 1;
+        }
+        else
+        {
+            filename = argv[1];
+        }
     }
 
-    if (!decompress)
+    std::ifstream inputFile(filename, std::ios::binary);
+    if (!inputFile.is_open())
+    {
+        std::cerr << "Failed to open input file." << std::endl;
+        return 1;
+    }
+
+    if (!decompress && !checkCRC)
     {
         std::string outputFilename = filename + ".bz2";
         std::ofstream outputFile(outputFilename, std::ios::binary);
@@ -63,7 +78,7 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        OutputStream bz2out(outputFile, blockSize, 12);
+        OutputStream bz2out(outputFile, blockSize, parallelCnt);
 
         const size_t bufferSize = 131072;
         std::vector<char> buffer(bufferSize);
@@ -81,7 +96,7 @@ int main(int argc, char *argv[])
 
         if (!keepFile)
         {
-            remove(filename.c_str());
+            std::remove(filename.c_str());
         }
 
         outputFile.close();
@@ -92,7 +107,7 @@ int main(int argc, char *argv[])
         {
             if (filename.size() < 4 || filename.substr(filename.size() - 4) != ".bz2")
             {
-                std::cerr << "Input file has wrong extension for decompression!" << std::endl;
+                std::cerr << "Input file doesn't have right .bz2 extenstion for decompression!" << std::endl;
                 return 1;
             }
 
@@ -117,17 +132,26 @@ int main(int argc, char *argv[])
                 char x = ch;
                 outputFile.write(&x, 1);
             }
-
-            if (!keepFile)
-            {
-                remove(filename.c_str());
-            }
+            bz2in.close();
 
             outputFile.close();
+        }
+        else
+        {
+            InputStream bz2in(inputFile);
+            while (bz2in.read() != -1)
+                ;
+            bz2in.close();
+            std::cout << "  Integrity check passed!" << std::endl;
         }
     }
 
     inputFile.close();
+
+    if (!keepFile && !checkCRC)
+    {
+        std::remove(filename.c_str());
+    }
 
     return 0;
 }

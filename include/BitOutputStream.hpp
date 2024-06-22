@@ -27,125 +27,110 @@
 #include <bitset>
 #include <stdexcept>
 
-class BitOutputStream
+std::vector<bool> getLeftBuffer(bool *bitBuffer, size_t *bitCount)
 {
-private:
-    static constexpr size_t BLOCK_MAX_BIT_SIZE = 9 * 100000 * 8 * 2;
-    std::bitset<BLOCK_MAX_BIT_SIZE> bitBuffer{};
-    size_t bitCount = 0UL;
-
-public:
-    explicit BitOutputStream() = default;
-
-    std::vector<bool> getLeftBuffer()
+    if (*bitCount >= 8U)
     {
-        if (bitCount >= 8U)
-        {
-            throw std::runtime_error("Couldn't write all bytes properly during last step.");
-        }
-
-        std::vector<bool> leftBuffer(bitCount);
-        for (int i = 0; i < bitCount; ++i)
-        {
-            leftBuffer[i] = bitBuffer[i];
-        }
-        bitCount = 0UL;
-
-        return leftBuffer;
+        throw std::runtime_error("Couldn't write all bytes properly during last step.");
     }
 
-    void writeFileBytes(std::ostream &out, const std::vector<bool> &leftBuffer)
+    std::vector<bool> leftBuffer(*bitCount);
+    for (int i = 0; i < *bitCount; ++i)
     {
-        size_t bitsLeft = leftBuffer.size();
+        leftBuffer[i] = bitBuffer[i];
+    }
+    *bitCount = 0UL;
 
-        // leftover and current doesn't make a byte
-        if (bitsLeft + bitCount < 8UL)
+    return leftBuffer;
+}
+
+void writeFileBytes(bool *bitBuffer, size_t *bitCount, std::ostream &out, const std::vector<bool> &leftBuffer)
+{
+    size_t bitsLeft = leftBuffer.size();
+
+    // leftover and current doesn't make a byte
+    if (bitsLeft + *bitCount < 8UL)
+    {
+        if (*bitCount)
         {
-            if (bitCount)
+            for (int i = *bitCount - 1; i >= 0; --i)
             {
-                for (size_t i = bitCount - 1UL; i >= 0UL; --i)
-                {
-                    bitBuffer[i + bitsLeft] = bitBuffer[i];
-                }
+                bitBuffer[i + bitsLeft] = bitBuffer[i];
             }
-
-            for (size_t i = 0UL; i < bitsLeft; ++i)
-            {
-                bitBuffer[i] = leftBuffer[i];
-            }
-            bitCount += bitsLeft;
-            return;
         }
 
-        unsigned char byte = 0U;
-        for (bool leftBit : leftBuffer)
+        for (size_t i = 0UL; i < bitsLeft; ++i)
         {
-            byte = (byte << 1) | leftBit;
+            bitBuffer[i] = leftBuffer[i];
         }
-        size_t offset = 8UL - bitsLeft;
-        for (size_t i = 0UL; i < offset; ++i)
+        *bitCount += bitsLeft;
+        return;
+    }
+
+    unsigned char byte = 0U;
+    for (bool leftBit : leftBuffer)
+    {
+        byte = (byte << 1) | leftBit;
+    }
+    size_t offset = 8UL - bitsLeft;
+    for (size_t i = 0UL; i < offset; ++i)
+    {
+        byte = (byte << 1) | bitBuffer[i];
+    }
+    out.put(byte);
+
+    *bitCount -= offset;
+    for (size_t i = 0UL; i < *bitCount / 8UL; ++i)
+    {
+        byte = 0U;
+        for (int j = 0; j < 8; ++j)
         {
-            byte = (byte << 1) | bitBuffer[i];
+            byte = (byte << 1) | bitBuffer[i * 8UL + j + offset];
         }
         out.put(byte);
-
-        bitCount -= offset;
-        for (size_t i = 0UL; i < bitCount / 8UL; ++i)
-        {
-            byte = 0U;
-            for (int j = 0; j < 8; ++j)
-            {
-                byte = (byte << 1) | bitBuffer[i * 8UL + j + offset];
-            }
-            out.put(byte);
-        }
-
-        // Shift left-over bits
-        for (size_t i = 0UL; i < (bitCount % 8UL); ++i)
-        {
-            bitBuffer[i] = bitBuffer[i + bitCount - (bitCount % 8) + offset];
-        }
-        bitCount %= 8UL;
     }
 
-    void writeBoolean(bool value)
+    // Shift left-over bits
+    for (size_t i = 0UL; i < (*bitCount % 8UL); ++i)
     {
-        if (bitCount == BLOCK_MAX_BIT_SIZE)
-        {
-            throw std::runtime_error("Block buffer too low");
-        }
-        bitBuffer[bitCount++] = value;
+        bitBuffer[i] = bitBuffer[i + *bitCount - (*bitCount % 8) + offset];
     }
+    *bitCount %= 8UL;
+}
 
-    void writeUnary(int value)
-    {
-        while (value-- > 0)
-        {
-            writeBoolean(true);
-        }
-        writeBoolean(false);
-    }
+void writeBoolean(bool *bitBuffer, size_t *bitCount, bool value)
+{
+    bitBuffer[(*bitCount)++] = value;
+}
 
-    void writeBits(int count, int value)
+void writeUnary(bool *bitBuffer, size_t *bitCount, int value)
+{
+    while (value-- > 0)
     {
-        for (int bitMask = (1 << (count - 1)); bitMask; bitMask >>= 1)
-        {
-            writeBoolean(bitMask & value);
-        }
+        writeBoolean(bitBuffer, bitCount, true);
     }
+    writeBoolean(bitBuffer, bitCount, false);
+}
 
-    void writeInteger(int value)
+void writeBits(bool *bitBuffer, size_t *bitCount, int count, int value)
+{
+    for (int bitMask = (1 << (count - 1)); bitMask; bitMask >>= 1)
     {
-        writeBits(16, (value >> 16) & 0xffff);
-        writeBits(16, value & 0xffff);
+        writeBoolean(bitBuffer, bitCount, bitMask & value);
     }
+}
 
-    void padding()
+void writeInteger(bool *bitBuffer, size_t *bitCount, int value)
+{
+    writeBits(bitBuffer, bitCount, 16, (value >> 16) & 0xffff);
+    writeBits(bitBuffer, bitCount, 16, value & 0xffff);
+}
+
+void padding(bool *bitBuffer, size_t *bitCount)
+{
+    if (*bitCount % 8UL != 0UL)
     {
-        if (bitCount % 8UL != 0UL)
-        {
-            writeBits(8 - (bitCount % 8UL), 0);
-        }
+        writeBits(bitBuffer, bitCount, 8 - (*bitCount % 8UL), 0);
     }
-};
+}
 #endif

@@ -119,7 +119,7 @@ private:
             throw std::runtime_error("Invalid BZip2 header");
         }
 
-        streamBlockSize = blockSize * 100000;
+        streamBlockSize = blockSize * BLOCKSIZE_DEFAULT;
     }
 
     bool initializeNextBlock()

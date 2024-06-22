@@ -31,29 +31,23 @@
 
 #include "Config.hpp"
 #include "CRC32.hpp"
-#include "BitOutputStream.hpp"
-#include "DivSufSort.hpp"
-#include "MTFAndRLE2StageEncoder.hpp"
-#include "HuffmanStageEncoder.hpp"
 
 class BlockCompressor
 {
 private:
-    BitOutputStream bitOutputStream{};
     CRC32 crc{};
     int blockLength = 0;
     int blockLengthLimit;
-    std::array<bool, 256> blockValuesPresent{};
-    std::vector<uint8_t> block;
-    std::vector<int> bwtBlock;
+    bool *blockValuesPresent;
+    unsigned char *block;
 
     int rleCurrentValue = -1;
     int rleLength = 0;
 
 public:
-    BlockCompressor(int blockSize) : block(blockSize + 1), // plus one to allow for the BWT wraparound
-                                     bwtBlock(blockSize + 1),
-                                     blockLengthLimit(blockSize - 6)
+    BlockCompressor(unsigned char *blockPtr, bool *valuesPresentPtr, int blockSize) : block(blockPtr), // plus one to allow for the BWT wraparound
+                                                                                      blockValuesPresent(valuesPresentPtr),
+                                                                                      blockLengthLimit(blockSize - 6)
     {
     }
 
@@ -67,9 +61,9 @@ public:
         return crc.getCRC();
     }
 
-    BitOutputStream &getBitOutputStream()
+    int getBlockLength() const
     {
-        return bitOutputStream;
+        return blockLength;
     }
 
     bool write(int value)
@@ -115,31 +109,12 @@ public:
         return written;
     }
 
-    void close()
+    void finishRLE()
     {
         if (rleLength > 0)
         {
             writeRun(rleCurrentValue & 0xff, rleLength);
         }
-
-        block[blockLength] = block[0];
-
-        DivSufSort divSufSort = DivSufSort(block, bwtBlock, blockLength);
-        int bwtStartPointer = divSufSort.bwt();
-
-        bitOutputStream.writeBits(24, BLOCK_HEADER_MARKER_1);
-        bitOutputStream.writeBits(24, BLOCK_HEADER_MARKER_2);
-        bitOutputStream.writeInteger(crc.getCRC());
-        bitOutputStream.writeBoolean(false); // Randomised block flag
-        bitOutputStream.writeBits(24, bwtStartPointer);
-
-        writeSymbolMap();
-
-        MTFAndRLE2StageEncoder mtfEncoder(bwtBlock, blockLength, blockValuesPresent);
-        mtfEncoder.encode();
-
-        HuffmanStageEncoder huffmanEncoder(bitOutputStream, mtfEncoder.getMtfBlock(), mtfEncoder.getMtfLength(), mtfEncoder.getMtfAlphabetSize(), mtfEncoder.getMtfSymbolFrequencies());
-        huffmanEncoder.encode();
     }
 
     void reset()
@@ -153,63 +128,26 @@ public:
         {
             blockValuesPresent[i] = false;
         }
-
-        for (int i = 0; i < block.size(); ++i)
-        {
-            block[i] = 0U;
-            bwtBlock[i] = 0;
-        }
     }
 
 private:
-    void writeSymbolMap()
-    {
-        std::array<bool, 16> condensedInUse{};
-        for (int i = 0; i < 16; ++i)
-        {
-            for (int j = 0, k = i << 4; j < 16; ++j, ++k)
-            {
-                if (blockValuesPresent[k])
-                {
-                    condensedInUse[i] = true;
-                }
-            }
-        }
-
-        for (int i = 0; i < 16; ++i)
-        {
-            bitOutputStream.writeBoolean(condensedInUse[i]);
-        }
-
-        for (int i = 0; i < 16; ++i)
-        {
-            if (condensedInUse[i])
-            {
-                for (int j = 0, k = i * 16; j < 16; ++j, ++k)
-                {
-                    bitOutputStream.writeBoolean(blockValuesPresent[k]);
-                }
-            }
-        }
-    }
-
     void writeRun(int value, int runLength)
     {
         blockValuesPresent[value] = true;
         crc.updateCRC(value, runLength);
-        block[blockLength++] = static_cast<uint8_t>(value);
+        block[blockLength++] = static_cast<unsigned char>(value);
         if (runLength > 1)
         {
-            block[blockLength++] = static_cast<uint8_t>(value);
+            block[blockLength++] = static_cast<unsigned char>(value);
             if (runLength > 2)
             {
-                block[blockLength++] = static_cast<uint8_t>(value);
+                block[blockLength++] = static_cast<unsigned char>(value);
                 if (runLength > 3)
                 {
                     runLength -= 4;
                     blockValuesPresent[runLength] = true;
-                    block[blockLength++] = static_cast<uint8_t>(value);
-                    block[blockLength++] = uint8_t(runLength);
+                    block[blockLength++] = static_cast<unsigned char>(value);
+                    block[blockLength++] = static_cast<unsigned char>(runLength);
                 }
             }
         }
